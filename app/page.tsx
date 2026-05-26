@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 
 type KhachThue = {
   id: number
@@ -170,6 +170,19 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
 
 type Toast = { msg: string; type: 'success' | 'error' }
 
+type PreviewRow = {
+  tenXuong: string
+  khuVuc: string
+  dienTich: number
+  giaThue: number
+  donViThue: string
+  ngayBatDau: string
+  ngayKetThuc: string
+  thoiGianThue: string | null
+  ngayTangGia: string | null
+  giaSauTang: number | null
+}
+
 export default function HomePage() {
   const [records, setRecords] = useState<KhachThue[]>([])
   const [search, setSearch] = useState('')
@@ -183,6 +196,15 @@ export default function HomePage() {
   const [deleteId, setDeleteId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
+
+  // Upload state
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showUpload, setShowUpload] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadDragging, setUploadDragging] = useState(false)
+  const [uploadPreview, setUploadPreview] = useState<{ valid: PreviewRow[]; errors: string[] } | null>(null)
+  const [uploadParsing, setUploadParsing] = useState(false)
+  const [uploadImporting, setUploadImporting] = useState(false)
 
   const showToast = useCallback((msg: string, type: 'success' | 'error') => {
     setToast({ msg, type })
@@ -307,6 +329,58 @@ export default function HomePage() {
     }
   }
 
+  function openUpload() {
+    setUploadFile(null)
+    setUploadPreview(null)
+    setShowUpload(true)
+  }
+
+  function closeUpload() {
+    setShowUpload(false)
+    setUploadFile(null)
+    setUploadPreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  async function parseUploadFile(file: File) {
+    setUploadFile(file)
+    setUploadParsing(true)
+    setUploadPreview(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('preview', 'true')
+      const res = await fetch('/api/khach-thue/upload', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) { showToast(data.error ?? 'Lỗi khi đọc file', 'error'); setUploadFile(null); return }
+      setUploadPreview({ valid: data.valid, errors: data.errors })
+    } catch {
+      showToast('Không thể đọc file', 'error')
+      setUploadFile(null)
+    } finally {
+      setUploadParsing(false)
+    }
+  }
+
+  async function handleImport() {
+    if (!uploadFile) return
+    setUploadImporting(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', uploadFile)
+      const res = await fetch('/api/khach-thue/upload', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) { showToast(data.error ?? 'Lỗi khi import', 'error'); return }
+      closeUpload()
+      await fetchData()
+      showToast(`Import thành công ${data.imported} dòng${data.errors?.length ? `, bỏ qua ${data.errors.length} dòng lỗi` : ''}`, 'success')
+    } catch {
+      showToast('Lỗi khi import. Vui lòng thử lại.', 'error')
+    } finally {
+      setUploadImporting(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Toast */}
@@ -352,15 +426,35 @@ export default function HomePage() {
               className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <button
-            onClick={openAdd}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Thêm mới
-          </button>
+          <div className="flex gap-2">
+            <a
+              href="/api/khach-thue/template"
+              className="flex items-center gap-2 border border-gray-300 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Tải template
+            </a>
+            <button
+              onClick={openUpload}
+              className="flex items-center gap-2 border border-emerald-500 text-emerald-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-50 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Import Excel/CSV
+            </button>
+            <button
+              onClick={openAdd}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Thêm mới
+            </button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -503,6 +597,140 @@ export default function HomePage() {
               >
                 {saving ? 'Đang lưu...' : editId ? 'Cập nhật' : 'Thêm mới'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Modal */}
+      {showUpload && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-lg font-semibold text-gray-800">Import Excel / CSV</h2>
+              <button onClick={closeUpload} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1">
+              {/* Drop zone */}
+              {!uploadPreview && (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setUploadDragging(true) }}
+                  onDragLeave={() => setUploadDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    setUploadDragging(false)
+                    const f = e.dataTransfer.files[0]
+                    if (f) parseUploadFile(f)
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${
+                    uploadDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) parseUploadFile(f) }}
+                  />
+                  {uploadParsing ? (
+                    <p className="text-gray-500 text-sm">Đang đọc file...</p>
+                  ) : (
+                    <>
+                      <svg className="w-10 h-10 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <p className="text-sm font-medium text-gray-700">Kéo thả file vào đây hoặc click để chọn</p>
+                      <p className="text-xs text-gray-400 mt-1">Hỗ trợ .xlsx, .xls, .csv</p>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Preview */}
+              {uploadPreview && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium text-gray-700">
+                        File: <span className="text-blue-600">{uploadFile?.name}</span>
+                      </span>
+                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                        {uploadPreview.valid.length} dòng hợp lệ
+                      </span>
+                      {uploadPreview.errors.length > 0 && (
+                        <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                          {uploadPreview.errors.length} dòng lỗi
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => { setUploadPreview(null); setUploadFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                      className="text-xs text-gray-500 hover:text-gray-700 underline"
+                    >
+                      Chọn file khác
+                    </button>
+                  </div>
+
+                  {/* Error list */}
+                  {uploadPreview.errors.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1">
+                      {uploadPreview.errors.map((e, i) => (
+                        <p key={i} className="text-xs text-red-700">{e}</p>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Preview table */}
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="overflow-x-auto max-h-64">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            {['Tên xưởng','Khu vực','Diện tích','Giá thuê','Đơn vị thuê','Ngày bắt đầu','Ngày kết thúc'].map(h => (
+                              <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {uploadPreview.valid.map((row, i) => (
+                            <tr key={i} className="border-t border-gray-100 hover:bg-gray-50">
+                              <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{row.tenXuong}</td>
+                              <td className="px-3 py-2 text-gray-600 max-w-[160px] truncate">{row.khuVuc}</td>
+                              <td className="px-3 py-2 text-gray-700">{row.dienTich?.toLocaleString('vi-VN')}</td>
+                              <td className="px-3 py-2 text-emerald-700">${row.giaThue?.toLocaleString('vi-VN')}</td>
+                              <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{row.donViThue}</td>
+                              <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.ngayBatDau ? new Date(row.ngayBatDau).toLocaleDateString('vi-VN') : '—'}</td>
+                              <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.ngayKetThuc ? new Date(row.ngayKetThuc).toLocaleDateString('vi-VN') : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
+              <button onClick={closeUpload} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                Hủy
+              </button>
+              {uploadPreview && uploadPreview.valid.length > 0 && (
+                <button
+                  onClick={handleImport}
+                  disabled={uploadImporting}
+                  className="px-5 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                >
+                  {uploadImporting ? 'Đang import...' : `Import ${uploadPreview.valid.length} dòng`}
+                </button>
+              )}
             </div>
           </div>
         </div>
