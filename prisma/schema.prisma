@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  createdAt DateTime @default(now())
+}
+
+model KhachThue {
+  id           Int       @id @default(autoincrement())
+  tenXuong     String
+  khuVuc       String
+  dienTich     Float
+  giaThue      Float
+  donViThue    String
+  ngayBatDau   DateTime
+  ngayKetThuc  DateTime
+  thoiGianThue String?
+  ngayTangGia  DateTime?
+  giaSauTang   Float?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
