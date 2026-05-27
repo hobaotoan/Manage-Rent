@@ -169,6 +169,84 @@ type ColModal    = {
 type RowModal    = { open: boolean; editRow: WorkRow | null; values: Record<number, string> }
 type DelConfirm  = { kind: 'table' | 'column' | 'row'; id: number; label: string }
 
+// ─── Card View ────────────────────────────────────────────────────────────────
+
+type CardViewProps = {
+  rows: WorkRow[]
+  cols: WorkColumn[]
+  onEdit: (row: WorkRow) => void
+  onDelete: (id: number) => void
+}
+
+function CardView({ rows, cols, onEdit, onDelete }: CardViewProps) {
+  if (rows.length === 0) return null
+  const primaryCol = cols[0]
+  const restCols   = cols.slice(1)
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+      {rows.map((row, idx) => {
+        const primaryCell = row.cells.find(c => c.columnId === primaryCol?.id)
+        return (
+          <div key={row.id}
+            className="bg-white rounded-xl border border-gray-200 flex flex-col hover:shadow-md transition-shadow cursor-pointer"
+            onClick={() => onEdit(row)}
+          >
+            {/* Card header */}
+            <div className="px-4 pt-4 pb-3 border-b border-gray-100">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  {primaryCol && (
+                    <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-0.5">
+                      {primaryCol.name}
+                    </p>
+                  )}
+                  <p className="font-semibold text-gray-800 text-sm leading-snug break-words">
+                    {primaryCell?.value || <span className="text-gray-300 font-normal">—</span>}
+                  </p>
+                </div>
+                <span className="flex-shrink-0 text-[10px] text-gray-300 bg-gray-50 rounded-full px-2 py-0.5 font-mono">
+                  #{idx + 1}
+                </span>
+              </div>
+            </div>
+
+            {/* Card body */}
+            <div className="px-4 py-3 flex-1 grid grid-cols-2 gap-x-4 gap-y-2.5">
+              {restCols.map(col => {
+                const cell = row.cells.find(c => c.columnId === col.id)
+                return (
+                  <div key={col.id} className={col.type === 'textarea' || col.type === 'url' ? 'col-span-2' : ''}>
+                    <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-0.5">{col.name}</p>
+                    <div className="text-sm text-gray-700">
+                      <CellValue value={cell?.value ?? null} col={col} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Card footer */}
+            <div className="px-4 py-2.5 border-t border-gray-100 flex gap-2" onClick={e => e.stopPropagation()}>
+              <button onClick={() => onEdit(row)}
+                className="flex-1 text-xs font-medium text-blue-600 hover:text-blue-700 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
+                ✏️ Sửa
+              </button>
+              <div className="w-px bg-gray-100" />
+              <button onClick={() => onDelete(row.id)}
+                className="flex-1 text-xs font-medium text-red-500 hover:text-red-600 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                🗑 Xóa
+              </button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
 export default function HomePage() {
   const [tables,      setTables]      = useState<WorkTable[]>([])
   const [activeId,    setActiveId]    = useState<number | null>(null)
@@ -178,6 +256,7 @@ export default function HomePage() {
   const [search,      setSearch]      = useState('')
   const [toast,       setToast]       = useState<Toast | null>(null)
   const [saving,      setSaving]      = useState(false)
+  const [viewMode,    setViewMode]    = useState<'table' | 'card'>('card')
 
   const [tabMenu,     setTabMenu]     = useState<number | null>(null)
   const [colMenu,     setColMenu]     = useState<number | null>(null)
@@ -530,13 +609,35 @@ export default function HomePage() {
                 />
               </div>
               <div className="flex gap-2 ml-auto">
+                {/* View toggle */}
+                <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+                  <button
+                    onClick={() => setViewMode('card')}
+                    title="Xem dạng card"
+                    className={`px-2.5 py-2 transition-colors ${viewMode === 'card' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => setViewMode('table')}
+                    title="Xem dạng bảng"
+                    className={`px-2.5 py-2 transition-colors border-l border-gray-300 ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 6h18M3 14h18M3 18h18"/>
+                    </svg>
+                  </button>
+                </div>
+
                 <button onClick={openAddCol}
                   className="flex items-center gap-1.5 border border-gray-300 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
                   </svg>
-                  <span>Thêm cột</span>
+                  <span className="hidden sm:inline">Thêm cột</span>
                 </button>
                 <button onClick={openAddRow}
                   className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
@@ -544,12 +645,46 @@ export default function HomePage() {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
                   </svg>
-                  <span>Thêm dòng</span>
+                  <span className="hidden sm:inline">Thêm dòng</span>
+                  <span className="sm:hidden">Thêm</span>
                 </button>
               </div>
             </div>
 
-            {/* Table */}
+            {/* Card view */}
+            {viewMode === 'card' && cols.length > 0 && (
+              <>
+                {rowsLoading ? (
+                  <div className="bg-white rounded-xl border border-gray-200 p-10 text-center text-sm text-gray-400">Đang tải...</div>
+                ) : filtered.length === 0 ? (
+                  <div className="bg-white rounded-xl border border-gray-200 p-10 text-center text-sm text-gray-400">
+                    {search ? `Không tìm thấy kết quả cho "${search}"` : 'Chưa có dữ liệu. Nhấn "Thêm dòng" để bắt đầu.'}
+                  </div>
+                ) : (
+                  <CardView
+                    rows={filtered}
+                    cols={cols}
+                    onEdit={openEditRow}
+                    onDelete={(id) => setDelConfirm({ kind: 'row', id, label: 'dòng này' })}
+                  />
+                )}
+                <div className="mt-3 flex items-center justify-between px-1">
+                  <span className="text-xs text-gray-400">
+                    {filtered.length} dòng{search ? ` / ${rows.length} tổng` : ''}
+                  </span>
+                  <button onClick={openAddRow}
+                    className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Thêm dòng
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Table view */}
+            {(viewMode === 'table' || cols.length === 0) && (
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
 
               {/* Empty columns */}
@@ -683,6 +818,7 @@ export default function HomePage() {
                 </div>
               )}
             </div>
+            )}
           </>
         )}
       </div>
