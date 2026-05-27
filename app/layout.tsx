@@ -4,8 +4,8 @@ import { getSession } from '@/lib/auth'
 import LogoutButton from './LogoutButton'
 
 export const metadata: Metadata = {
-  title: 'Quản Lý Thông Tin Khách Thuê',
-  description: 'Hệ thống quản lý thông tin khách thuê xưởng',
+  title: 'Quản Lý Dữ Liệu',
+  description: 'Hệ thống quản lý dữ liệu linh hoạt',
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

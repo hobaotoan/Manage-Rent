@@ -1,730 +1,847 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-type KhachThue = {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type ColType = 'text' | 'number' | 'date' | 'select' | 'textarea' | 'url' | 'checkbox'
+
+type WorkColumn = {
   id: number
-  tenXuong: string
-  khuVuc: string
-  dienTich: number
-  giaThue: number
-  donViThue: string
-  ngayBatDau: string
-  ngayKetThuc: string
-  thoiGianThue: string | null
-  ngayTangGia: string | null
-  giaSauTang: number | null
+  tableId: number
+  name: string
+  type: ColType
+  required: boolean
+  position: number
+  options: string | null
+}
+
+type WorkCell = {
+  id: number
+  rowId: number
+  columnId: number
+  value: string | null
+}
+
+type WorkRow = {
+  id: number
+  tableId: number
+  position: number
   createdAt: string
+  cells: WorkCell[]
 }
 
-type SortKey = keyof Pick<
-  KhachThue,
-  'tenXuong' | 'khuVuc' | 'dienTich' | 'giaThue' | 'donViThue' | 'ngayBatDau' | 'ngayKetThuc' | 'ngayTangGia' | 'giaSauTang' | 'createdAt'
->
-type SortDir = 'asc' | 'desc'
-
-type FormData = {
-  tenXuong: string
-  khuVuc: string
-  dienTich: string
-  giaThue: string
-  donViThue: string
-  ngayBatDau: string
-  ngayKetThuc: string
-  thoiGianThue: string
-  ngayTangGia: string
-  giaSauTang: string
+type WorkTable = {
+  id: number
+  name: string
+  position: number
+  columns: WorkColumn[]
 }
 
-const emptyForm: FormData = {
-  tenXuong: '',
-  khuVuc: '',
-  dienTich: '',
-  giaThue: '',
-  donViThue: '',
-  ngayBatDau: '',
-  ngayKetThuc: '',
-  thoiGianThue: '',
-  ngayTangGia: '',
-  giaSauTang: '',
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const COL_TYPES: { value: ColType; label: string; icon: string }[] = [
+  { value: 'text',     label: 'Văn bản',   icon: 'T'  },
+  { value: 'number',   label: 'Số',         icon: '#'  },
+  { value: 'date',     label: 'Ngày',       icon: '⊡'  },
+  { value: 'select',   label: 'Lựa chọn',  icon: '▾'  },
+  { value: 'textarea', label: 'Đoạn văn',  icon: '¶'  },
+  { value: 'url',      label: 'Liên kết',  icon: '↗'  },
+  { value: 'checkbox', label: 'Checkbox',  icon: '☑'  },
+]
+
+const BADGE_COLORS = [
+  'bg-blue-100 text-blue-700 border-blue-200',
+  'bg-emerald-100 text-emerald-700 border-emerald-200',
+  'bg-yellow-100 text-yellow-700 border-yellow-200',
+  'bg-red-100 text-red-700 border-red-200',
+  'bg-purple-100 text-purple-700 border-purple-200',
+  'bg-pink-100 text-pink-700 border-pink-200',
+  'bg-orange-100 text-orange-700 border-orange-200',
+  'bg-cyan-100 text-cyan-700 border-cyan-200',
+]
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function parseOptions(raw: string | null): string[] {
+  if (!raw) return []
+  try { return JSON.parse(raw) } catch { return [] }
 }
 
-function toFormData(r: KhachThue): FormData {
-  return {
-    tenXuong: r.tenXuong,
-    khuVuc: r.khuVuc,
-    dienTich: String(r.dienTich),
-    giaThue: String(r.giaThue),
-    donViThue: r.donViThue,
-    ngayBatDau: r.ngayBatDau ? r.ngayBatDau.slice(0, 10) : '',
-    ngayKetThuc: r.ngayKetThuc ? r.ngayKetThuc.slice(0, 10) : '',
-    thoiGianThue: r.thoiGianThue ?? '',
-    ngayTangGia: r.ngayTangGia ? r.ngayTangGia.slice(0, 10) : '',
-    giaSauTang: r.giaSauTang != null ? String(r.giaSauTang) : '',
-  }
+function fmtDate(val: string | null) {
+  if (!val) return ''
+  const d = new Date(val)
+  return isNaN(d.getTime()) ? val : d.toLocaleDateString('vi-VN')
 }
 
-function toPayload(form: FormData) {
-  return {
-    tenXuong: form.tenXuong.trim(),
-    khuVuc: form.khuVuc.trim(),
-    dienTich: Number(form.dienTich),
-    giaThue: Number(form.giaThue),
-    donViThue: form.donViThue.trim(),
-    ngayBatDau: form.ngayBatDau,
-    ngayKetThuc: form.ngayKetThuc,
-    thoiGianThue: form.thoiGianThue.trim() || null,
-    ngayTangGia: form.ngayTangGia || null,
-    giaSauTang: form.giaSauTang !== '' ? Number(form.giaSauTang) : null,
-  }
+function fmtNum(val: string | null) {
+  if (!val) return ''
+  const n = Number(val)
+  return isNaN(n) ? val : n.toLocaleString('vi-VN')
 }
 
-function validate(form: FormData): string | null {
-  if (!form.tenXuong.trim()) return 'Vui lòng nhập tên xưởng'
-  if (!form.khuVuc.trim()) return 'Vui lòng nhập khu vực'
-  if (!form.dienTich || isNaN(Number(form.dienTich)) || Number(form.dienTich) <= 0)
-    return 'Diện tích không hợp lệ'
-  if (!form.giaThue || isNaN(Number(form.giaThue)) || Number(form.giaThue) <= 0)
-    return 'Giá thuê không hợp lệ'
-  if (!form.donViThue.trim()) return 'Vui lòng nhập đơn vị thuê'
-  if (!form.ngayBatDau) return 'Vui lòng chọn ngày bắt đầu'
-  if (!form.ngayKetThuc) return 'Vui lòng chọn ngày kết thúc'
-  if (form.ngayBatDau >= form.ngayKetThuc) return 'Ngày kết thúc phải sau ngày bắt đầu'
-  if (form.giaSauTang !== '' && isNaN(Number(form.giaSauTang)))
-    return 'Giá sau tăng không hợp lệ'
-  return null
-}
+// ─── Sub-components (outside main to avoid remount on re-render) ──────────────
 
-function fmtDate(iso: string | null) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('vi-VN')
-}
+function CellValue({ value, col }: { value: string | null; col: WorkColumn }) {
+  if (value === null || value === '')
+    return <span className="text-gray-300 select-none">—</span>
 
-function fmtNum(n: number | null) {
-  if (n == null) return '—'
-  return n.toLocaleString('vi-VN')
-}
-
-function sortRecords(records: KhachThue[], key: SortKey, dir: SortDir): KhachThue[] {
-  return [...records].sort((a, b) => {
-    const av = a[key]
-    const bv = b[key]
-    if (av == null && bv == null) return 0
-    if (av == null) return 1
-    if (bv == null) return -1
-    let cmp = 0
-    if (typeof av === 'number' && typeof bv === 'number') {
-      cmp = av - bv
-    } else {
-      cmp = String(av).localeCompare(String(bv), 'vi')
+  switch (col.type) {
+    case 'number':
+      return <span className="font-mono tabular-nums">{fmtNum(value)}</span>
+    case 'date':
+      return <span>{fmtDate(value)}</span>
+    case 'checkbox':
+      return value === 'true'
+        ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600 text-xs">✓</span>
+        : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 text-gray-400 text-xs">✗</span>
+    case 'url':
+      return (
+        <a href={value} target="_blank" rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          className="text-blue-600 hover:underline truncate max-w-[180px] block text-sm"
+        >{value}</a>
+      )
+    case 'select': {
+      const opts = parseOptions(col.options)
+      const idx = opts.indexOf(value)
+      const color = BADGE_COLORS[idx >= 0 ? idx % BADGE_COLORS.length : 0]
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${color}`}>
+          {value}
+        </span>
+      )
     }
-    return dir === 'asc' ? cmp : -cmp
-  })
+    case 'textarea':
+      return <span className="line-clamp-2 text-sm whitespace-pre-line">{value}</span>
+    default:
+      return <span className="text-sm">{value}</span>
+  }
 }
 
-type FieldProps = {
-  label: string
-  type?: string
-  required?: boolean
-  value: string
-  onChange: (val: string) => void
-  placeholder?: string
+type FieldInputProps = { col: WorkColumn; value: string; onChange: (v: string) => void }
+
+function FieldInput({ col, value, onChange }: FieldInputProps) {
+  const base = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white'
+  const opts = parseOptions(col.options)
+
+  switch (col.type) {
+    case 'number':
+      return <input type="number" value={value} onChange={e => onChange(e.target.value)} className={base} />
+    case 'date':
+      return <input type="date" value={value} onChange={e => onChange(e.target.value)} className={base} />
+    case 'checkbox':
+      return (
+        <label className="flex items-center gap-3 cursor-pointer mt-1">
+          <input type="checkbox" checked={value === 'true'}
+            onChange={e => onChange(e.target.checked ? 'true' : 'false')}
+            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-gray-600">{value === 'true' ? 'Có' : 'Không'}</span>
+        </label>
+      )
+    case 'url':
+      return <input type="url" value={value} onChange={e => onChange(e.target.value)} placeholder="https://..." className={base} />
+    case 'textarea':
+      return <textarea value={value} onChange={e => onChange(e.target.value)} rows={3} className={base + ' resize-none'} />
+    case 'select':
+      return (
+        <select value={value} onChange={e => onChange(e.target.value)} className={base}>
+          <option value="">— Chọn —</option>
+          {opts.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      )
+    default:
+      return <input type="text" value={value} onChange={e => onChange(e.target.value)} className={base} />
+  }
 }
 
-function Field({ label, type = 'text', required, value, onChange, placeholder }: FieldProps) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
-      <input
-        type={type}
-        required={required}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-gray-300"
-      />
-    </div>
-  )
-}
-
-function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  return (
-    <span className="inline-flex flex-col ml-1 opacity-40" style={{ opacity: active ? 1 : 0.35 }}>
-      <svg
-        className={`w-2.5 h-2.5 -mb-0.5 ${active && dir === 'asc' ? 'text-blue-600' : 'text-gray-400'}`}
-        viewBox="0 0 10 6" fill="currentColor"
-      >
-        <path d="M5 0L10 6H0z" />
-      </svg>
-      <svg
-        className={`w-2.5 h-2.5 ${active && dir === 'desc' ? 'text-blue-600' : 'text-gray-400'}`}
-        viewBox="0 0 10 6" fill="currentColor"
-      >
-        <path d="M5 6L0 0H10z" />
-      </svg>
-    </span>
-  )
-}
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 type Toast = { msg: string; type: 'success' | 'error' }
 
-type PreviewRow = {
-  tenXuong: string
-  khuVuc: string
-  dienTich: number
-  giaThue: number
-  donViThue: string
-  ngayBatDau: string
-  ngayKetThuc: string
-  thoiGianThue: string | null
-  ngayTangGia: string | null
-  giaSauTang: number | null
+type TableModal  = { open: boolean; editId: number | null; name: string }
+type ColModal    = {
+  open: boolean; editCol: WorkColumn | null
+  name: string; type: ColType; required: boolean
+  options: string[]; newOption: string
 }
+type RowModal    = { open: boolean; editRow: WorkRow | null; values: Record<number, string> }
+type DelConfirm  = { kind: 'table' | 'column' | 'row'; id: number; label: string }
 
 export default function HomePage() {
-  const [records, setRecords] = useState<KhachThue[]>([])
-  const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [sortKey, setSortKey] = useState<SortKey>('createdAt')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
-  const [showModal, setShowModal] = useState(false)
-  const [editId, setEditId] = useState<number | null>(null)
-  const [form, setForm] = useState<FormData>(emptyForm)
-  const [formError, setFormError] = useState<string | null>(null)
-  const [deleteId, setDeleteId] = useState<number | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState<Toast | null>(null)
+  const [tables,      setTables]      = useState<WorkTable[]>([])
+  const [activeId,    setActiveId]    = useState<number | null>(null)
+  const [rows,        setRows]        = useState<WorkRow[]>([])
+  const [loading,     setLoading]     = useState(true)
+  const [rowsLoading, setRowsLoading] = useState(false)
+  const [search,      setSearch]      = useState('')
+  const [toast,       setToast]       = useState<Toast | null>(null)
+  const [saving,      setSaving]      = useState(false)
 
-  // Upload state
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [showUpload, setShowUpload] = useState(false)
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [uploadDragging, setUploadDragging] = useState(false)
-  const [uploadPreview, setUploadPreview] = useState<{ valid: PreviewRow[]; errors: string[] } | null>(null)
-  const [uploadParsing, setUploadParsing] = useState(false)
-  const [uploadImporting, setUploadImporting] = useState(false)
+  const [tabMenu,     setTabMenu]     = useState<number | null>(null)
+  const [colMenu,     setColMenu]     = useState<number | null>(null)
+  const tabMenuRef = useRef<HTMLDivElement>(null)
+  const colMenuRef = useRef<HTMLDivElement>(null)
+
+  const [tableModal,  setTableModal]  = useState<TableModal>({ open: false, editId: null, name: '' })
+  const [colModal,    setColModal]    = useState<ColModal>({
+    open: false, editCol: null, name: '', type: 'text', required: false, options: [], newOption: ''
+  })
+  const [rowModal,    setRowModal]    = useState<RowModal>({ open: false, editRow: null, values: {} })
+  const [delConfirm,  setDelConfirm]  = useState<DelConfirm | null>(null)
+
+  const activeTable = tables.find(t => t.id === activeId) ?? null
+  const cols        = activeTable?.columns ?? []
+
+  // ── Toast ──────────────────────────────────────────────────────────────────
 
   const showToast = useCallback((msg: string, type: 'success' | 'error') => {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 3000)
   }, [])
 
-  const fetchData = useCallback(async () => {
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+
+  const fetchTables = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/khach-thue?search=${encodeURIComponent(search)}`, {
-        cache: 'no-store',
-      })
-      const data = await res.json()
-      setRecords(data)
-    } catch {
-      showToast('Lỗi khi tải dữ liệu', 'error')
-    } finally {
-      setLoading(false)
-    }
-  }, [search, showToast])
+      const res  = await fetch('/api/tables', { cache: 'no-store' })
+      const data: WorkTable[] = await res.json()
+      setTables(data)
+      if (data.length > 0)
+        setActiveId(prev => prev ?? data[0].id)
+    } catch { showToast('Lỗi khi tải dữ liệu', 'error') }
+    finally  { setLoading(false) }
+  }, [showToast])
+
+  const fetchRows = useCallback(async (tableId: number) => {
+    setRowsLoading(true)
+    try {
+      const res  = await fetch(`/api/tables/${tableId}/rows`, { cache: 'no-store' })
+      const data: WorkRow[] = await res.json()
+      setRows(data)
+    } catch { showToast('Lỗi khi tải dữ liệu', 'error') }
+    finally  { setRowsLoading(false) }
+  }, [showToast])
+
+  useEffect(() => { fetchTables() }, [fetchTables])
+  useEffect(() => { if (activeId) fetchRows(activeId); else setRows([]) }, [activeId, fetchRows])
+
+  // ── Close menus on outside click ───────────────────────────────────────────
 
   useEffect(() => {
-    const timer = setTimeout(fetchData, 300)
-    return () => clearTimeout(timer)
-  }, [fetchData])
-
-  const sorted = useMemo(() => sortRecords(records, sortKey, sortDir), [records, sortKey, sortDir])
-
-  function handleSort(key: SortKey) {
-    if (key === sortKey) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortKey(key)
-      setSortDir('asc')
+    const handler = (e: MouseEvent) => {
+      if (tabMenuRef.current && !tabMenuRef.current.contains(e.target as Node)) setTabMenu(null)
+      if (colMenuRef.current && !colMenuRef.current.contains(e.target as Node)) setColMenu(null)
     }
-  }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
-  function Th({
-    label,
-    col,
-    align = 'left',
-  }: {
-    label: string
-    col: SortKey
-    align?: 'left' | 'right' | 'center'
-  }) {
-    const active = sortKey === col
-    return (
-      <th
-        className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer select-none hover:bg-gray-100 transition-colors text-${align}`}
-        onClick={() => handleSort(col)}
-      >
-        <span className="inline-flex items-center gap-0.5">
-          {label}
-          <SortIcon active={active} dir={sortDir} />
-        </span>
-      </th>
-    )
-  }
+  // ── Filter ─────────────────────────────────────────────────────────────────
 
-  function setField(name: keyof FormData, val: string) {
-    setForm((f) => ({ ...f, [name]: val }))
-    setFormError(null)
-  }
+  const filtered = useMemo(() => {
+    if (!search.trim()) return rows
+    const q = search.toLowerCase()
+    return rows.filter(r => r.cells.some(c => c.value?.toLowerCase().includes(q)))
+  }, [rows, search])
 
-  function openAdd() {
-    setEditId(null)
-    setForm(emptyForm)
-    setFormError(null)
-    setShowModal(true)
-  }
+  // ── Table CRUD ─────────────────────────────────────────────────────────────
 
-  function openEdit(r: KhachThue) {
-    setEditId(r.id)
-    setForm(toFormData(r))
-    setFormError(null)
-    setShowModal(true)
-  }
-
-  function closeModal() {
-    setShowModal(false)
-    setFormError(null)
-  }
-
-  async function handleSave() {
-    const err = validate(form)
-    if (err) { setFormError(err); return }
+  async function handleSaveTable() {
+    if (!tableModal.name.trim()) return
     setSaving(true)
     try {
-      const payload = toPayload(form)
-      const res = editId
-        ? await fetch(`/api/khach-thue/${editId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          })
-        : await fetch('/api/khach-thue', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          })
-      if (!res.ok) throw new Error()
-      closeModal()
-      await fetchData()
-      showToast(editId ? 'Cập nhật thành công' : 'Thêm mới thành công', 'success')
-    } catch {
-      showToast('Lỗi khi lưu dữ liệu. Vui lòng thử lại.', 'error')
-    } finally {
-      setSaving(false)
-    }
+      if (tableModal.editId) {
+        await fetch(`/api/tables/${tableModal.editId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: tableModal.name }),
+        })
+        setTables(prev => prev.map(t => t.id === tableModal.editId ? { ...t, name: tableModal.name.trim() } : t))
+        showToast('Đổi tên thành công', 'success')
+      } else {
+        const res  = await fetch('/api/tables', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: tableModal.name }),
+        })
+        const created: WorkTable = await res.json()
+        setTables(prev => [...prev, created])
+        setActiveId(created.id)
+        setRows([])
+        showToast('Tạo bảng thành công', 'success')
+      }
+      setTableModal({ open: false, editId: null, name: '' })
+    } catch { showToast('Lỗi khi lưu', 'error') }
+    finally { setSaving(false) }
   }
 
-  async function handleDelete(id: number) {
+  async function handleDeleteTable(id: number) {
     try {
-      const res = await fetch(`/api/khach-thue/${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
-      setDeleteId(null)
-      await fetchData()
-      showToast('Xóa thành công', 'success')
-    } catch {
-      showToast('Lỗi khi xóa. Vui lòng thử lại.', 'error')
-    }
+      await fetch(`/api/tables/${id}`, { method: 'DELETE' })
+      const rest = tables.filter(t => t.id !== id)
+      setTables(rest)
+      if (activeId === id) { setActiveId(rest[0]?.id ?? null); setRows([]) }
+      setDelConfirm(null)
+      showToast('Đã xóa bảng', 'success')
+    } catch { showToast('Lỗi khi xóa', 'error') }
   }
 
-  function openUpload() {
-    setUploadFile(null)
-    setUploadPreview(null)
-    setShowUpload(true)
+  // ── Column CRUD ────────────────────────────────────────────────────────────
+
+  function openAddCol() {
+    setColModal({ open: true, editCol: null, name: '', type: 'text', required: false, options: [], newOption: '' })
   }
 
-  function closeUpload() {
-    setShowUpload(false)
-    setUploadFile(null)
-    setUploadPreview(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
+  function openEditCol(col: WorkColumn) {
+    setColModal({
+      open: true, editCol: col, name: col.name, type: col.type,
+      required: col.required, options: parseOptions(col.options), newOption: '',
+    })
+    setColMenu(null)
   }
 
-  async function parseUploadFile(file: File) {
-    setUploadFile(file)
-    setUploadParsing(true)
-    setUploadPreview(null)
+  async function handleSaveCol() {
+    if (!colModal.name.trim() || !activeId) return
+    setSaving(true)
     try {
-      const fd = new FormData()
-      fd.append('file', file)
-      fd.append('preview', 'true')
-      const res = await fetch('/api/khach-thue/upload', { method: 'POST', body: fd })
-      const data = await res.json()
-      if (!res.ok) { showToast(data.error ?? 'Lỗi khi đọc file', 'error'); setUploadFile(null); return }
-      setUploadPreview({ valid: data.valid, errors: data.errors })
-    } catch {
-      showToast('Không thể đọc file', 'error')
-      setUploadFile(null)
-    } finally {
-      setUploadParsing(false)
-    }
+      if (colModal.editCol) {
+        const res  = await fetch(`/api/tables/${activeId}/columns/${colModal.editCol.id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: colModal.name, type: colModal.type, required: colModal.required, options: colModal.options }),
+        })
+        const updated: WorkColumn = await res.json()
+        setTables(prev => prev.map(t => t.id === activeId
+          ? { ...t, columns: t.columns.map(c => c.id === updated.id ? updated : c) }
+          : t
+        ))
+        showToast('Đã cập nhật cột', 'success')
+      } else {
+        const res  = await fetch(`/api/tables/${activeId}/columns`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: colModal.name, type: colModal.type, required: colModal.required, options: colModal.options }),
+        })
+        const created: WorkColumn = await res.json()
+        setTables(prev => prev.map(t => t.id === activeId
+          ? { ...t, columns: [...t.columns, created] }
+          : t
+        ))
+        showToast('Đã thêm cột', 'success')
+      }
+      setColModal({ open: false, editCol: null, name: '', type: 'text', required: false, options: [], newOption: '' })
+    } catch { showToast('Lỗi khi lưu cột', 'error') }
+    finally { setSaving(false) }
   }
 
-  async function handleImport() {
-    if (!uploadFile) return
-    setUploadImporting(true)
+  async function handleDeleteCol(colId: number) {
+    if (!activeId) return
     try {
-      const fd = new FormData()
-      fd.append('file', uploadFile)
-      const res = await fetch('/api/khach-thue/upload', { method: 'POST', body: fd })
-      const data = await res.json()
-      if (!res.ok) { showToast(data.error ?? 'Lỗi khi import', 'error'); return }
-      closeUpload()
-      await fetchData()
-      showToast(`Import thành công ${data.imported} dòng${data.errors?.length ? `, bỏ qua ${data.errors.length} dòng lỗi` : ''}`, 'success')
-    } catch {
-      showToast('Lỗi khi import. Vui lòng thử lại.', 'error')
-    } finally {
-      setUploadImporting(false)
-    }
+      await fetch(`/api/tables/${activeId}/columns/${colId}`, { method: 'DELETE' })
+      setTables(prev => prev.map(t => t.id === activeId
+        ? { ...t, columns: t.columns.filter(c => c.id !== colId) }
+        : t
+      ))
+      setDelConfirm(null)
+      setColModal(m => ({ ...m, open: false }))
+      showToast('Đã xóa cột', 'success')
+    } catch { showToast('Lỗi khi xóa', 'error') }
   }
+
+  // ── Row CRUD ───────────────────────────────────────────────────────────────
+
+  function openAddRow() {
+    if (!activeTable) return
+    const values: Record<number, string> = {}
+    activeTable.columns.forEach(c => { values[c.id] = '' })
+    setRowModal({ open: true, editRow: null, values })
+  }
+
+  function openEditRow(row: WorkRow) {
+    if (!activeTable) return
+    const values: Record<number, string> = {}
+    activeTable.columns.forEach(c => {
+      values[c.id] = row.cells.find(cell => cell.columnId === c.id)?.value ?? ''
+    })
+    setRowModal({ open: true, editRow: row, values })
+  }
+
+  async function handleSaveRow() {
+    if (!activeId) return
+    setSaving(true)
+    try {
+      const cells = Object.entries(rowModal.values).map(([colId, value]) => ({
+        columnId: Number(colId), value: value || null,
+      }))
+      if (rowModal.editRow) {
+        const res  = await fetch(`/api/tables/${activeId}/rows/${rowModal.editRow.id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cells }),
+        })
+        const updated: WorkRow = await res.json()
+        setRows(prev => prev.map(r => r.id === updated.id ? updated : r))
+        showToast('Đã cập nhật', 'success')
+      } else {
+        const res  = await fetch(`/api/tables/${activeId}/rows`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cells }),
+        })
+        const created: WorkRow = await res.json()
+        setRows(prev => [created, ...prev])
+        showToast('Đã thêm mới', 'success')
+      }
+      setRowModal({ open: false, editRow: null, values: {} })
+    } catch { showToast('Lỗi khi lưu', 'error') }
+    finally { setSaving(false) }
+  }
+
+  async function handleDeleteRow(rowId: number) {
+    if (!activeId) return
+    try {
+      await fetch(`/api/tables/${activeId}/rows/${rowId}`, { method: 'DELETE' })
+      setRows(prev => prev.filter(r => r.id !== rowId))
+      setDelConfirm(null)
+      showToast('Đã xóa', 'success')
+    } catch { showToast('Lỗi khi xóa', 'error') }
+  }
+
+  async function handleConfirmDelete() {
+    if (!delConfirm) return
+    if (delConfirm.kind === 'table')  await handleDeleteTable(delConfirm.id)
+    if (delConfirm.kind === 'column') await handleDeleteCol(delConfirm.id)
+    if (delConfirm.kind === 'row')    await handleDeleteRow(delConfirm.id)
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Toast — full width on mobile */}
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+
+      {/* Toast */}
       {toast && (
         <div className={`fixed top-4 left-4 right-4 sm:left-auto sm:right-4 sm:max-w-sm z-[100] px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 ${
-          toast.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'
+          toast.type === 'success'
+            ? 'bg-green-50 text-green-800 border border-green-200'
+            : 'bg-red-50 text-red-800 border border-red-200'
         }`}>
           {toast.type === 'success'
-            ? <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-            : <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            ? <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+            : <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
           }
           {toast.msg}
         </div>
       )}
 
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
-        <h1 className="text-lg sm:text-xl font-bold text-gray-800">Quản Lý Thông Tin Khách Thuê</h1>
-        <p className="text-xs sm:text-sm text-gray-500 mt-0.5">Danh sách xưởng cho thuê</p>
-      </div>
-
-      <div className="px-4 sm:px-6 py-4 sm:py-5">
-        {/* Toolbar */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
-          {/* Search */}
-          <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Tìm kiếm..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          {/* Buttons */}
-          <div className="flex gap-2">
-            <a href="/api/khach-thue/template"
-              className="flex items-center gap-1.5 border border-gray-300 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <span className="hidden sm:inline">Tải template</span>
-            </a>
-            <button onClick={openUpload}
-              className="flex items-center gap-1.5 border border-emerald-500 text-emerald-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-emerald-50 transition-colors"
-            >
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-              <span className="hidden sm:inline">Import Excel/CSV</span>
-              <span className="sm:hidden">Import</span>
-            </button>
-            <button onClick={openAdd}
-              className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-            >
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              <span className="hidden sm:inline">Thêm mới</span>
-              <span className="sm:hidden">Thêm</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4 sm:mb-5">
-          <div className="bg-white rounded-xl border border-gray-200 px-3 sm:px-5 py-3 sm:py-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium leading-tight">Tổng xưởng</p>
-            <p className="text-xl sm:text-2xl font-bold text-gray-800 mt-1">{records.length}</p>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 px-3 sm:px-5 py-3 sm:py-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium leading-tight">Diện tích</p>
-            <p className="text-xl sm:text-2xl font-bold text-gray-800 mt-1">
-              <span className="sm:hidden">{(records.reduce((s,r)=>s+r.dienTich,0)/1000).toFixed(1)}k</span>
-              <span className="hidden sm:inline">{records.reduce((s,r)=>s+r.dienTich,0).toLocaleString('vi-VN')}</span>
-              <span className="text-sm font-normal text-gray-500 ml-1">m²</span>
-            </p>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 px-3 sm:px-5 py-3 sm:py-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium leading-tight">Giá thuê/T</p>
-            <p className="text-xl sm:text-2xl font-bold text-gray-800 mt-1">
-              $<span className="sm:hidden">{(records.reduce((s,r)=>s+r.giaThue,0)/1000).toFixed(0)}k</span>
-              <span className="hidden sm:inline">{records.reduce((s,r)=>s+r.giaThue,0).toLocaleString('vi-VN')}</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Desktop Table */}
-        <div className="hidden sm:block bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide w-10">STT</th>
-                  <Th label="Tên xưởng" col="tenXuong" />
-                  <Th label="Khu vực" col="khuVuc" />
-                  <Th label="Diện tích (m²)" col="dienTich" align="right" />
-                  <Th label="Giá thuê (USD/T)" col="giaThue" align="right" />
-                  <Th label="Đơn vị thuê" col="donViThue" />
-                  <Th label="Ngày bắt đầu" col="ngayBatDau" align="center" />
-                  <Th label="Ngày kết thúc" col="ngayKetThuc" align="center" />
-                  <Th label="Ngày tăng giá" col="ngayTangGia" align="center" />
-                  <Th label="Giá sau tăng" col="giaSauTang" align="right" />
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={11} className="text-center py-12 text-gray-400">Đang tải...</td></tr>
-                ) : sorted.length === 0 ? (
-                  <tr><td colSpan={11} className="text-center py-12 text-gray-400">
-                    {search ? `Không tìm thấy kết quả cho "${search}"` : 'Không có dữ liệu'}
-                  </td></tr>
-                ) : sorted.map((r, idx) => (
-                  <tr key={r.id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors">
-                    <td className="px-4 py-3 text-gray-400 text-center">{idx + 1}</td>
-                    <td className="px-4 py-3 font-medium text-gray-800">{r.tenXuong}</td>
-                    <td className="px-4 py-3 text-gray-600">{r.khuVuc}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{fmtNum(r.dienTich)}</td>
-                    <td className="px-4 py-3 text-right font-medium text-emerald-700">${fmtNum(r.giaThue)}</td>
-                    <td className="px-4 py-3 text-gray-700">{r.donViThue}</td>
-                    <td className="px-4 py-3 text-center text-gray-600">{fmtDate(r.ngayBatDau)}</td>
-                    <td className="px-4 py-3 text-center text-gray-600">{fmtDate(r.ngayKetThuc)}</td>
-                    <td className="px-4 py-3 text-center text-orange-600">{fmtDate(r.ngayTangGia)}</td>
-                    <td className="px-4 py-3 text-right text-orange-700">{r.giaSauTang != null ? `$${fmtNum(r.giaSauTang)}` : '—'}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => openEdit(r)} className="text-blue-600 hover:text-blue-800 text-xs font-medium px-2 py-1 rounded hover:bg-blue-50 transition-colors">Sửa</button>
-                        <button onClick={() => setDeleteId(r.id)} className="text-red-500 hover:text-red-700 text-xs font-medium px-2 py-1 rounded hover:bg-red-50 transition-colors">Xóa</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Mobile Card List */}
-        <div className="sm:hidden space-y-3">
+      {/* ── Table Tabs ──────────────────────────────────────────────────────── */}
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-30">
+        <div className="px-2 sm:px-4 flex items-center overflow-x-auto scrollbar-hide">
           {loading ? (
-            <div className="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400 text-sm">Đang tải...</div>
-          ) : sorted.length === 0 ? (
-            <div className="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400 text-sm">
-              {search ? `Không tìm thấy kết quả cho "${search}"` : 'Không có dữ liệu'}
-            </div>
-          ) : sorted.map((r) => (
-            <div key={r.id} className="bg-white rounded-xl border border-gray-200 p-4">
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-800 text-sm leading-tight">{r.tenXuong}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">{r.donViThue}</p>
-                </div>
-                <div className="flex gap-1.5 flex-shrink-0">
-                  <button onClick={() => openEdit(r)} className="text-blue-600 text-xs font-medium px-2.5 py-1 rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors">Sửa</button>
-                  <button onClick={() => setDeleteId(r.id)} className="text-red-500 text-xs font-medium px-2.5 py-1 rounded-lg border border-red-200 hover:bg-red-50 transition-colors">Xóa</button>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 mb-3 leading-relaxed">{r.khuVuc}</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-gray-50 rounded-lg px-3 py-2">
-                  <p className="text-xs text-gray-400">Diện tích</p>
-                  <p className="text-sm font-medium text-gray-700">{fmtNum(r.dienTich)} m²</p>
-                </div>
-                <div className="bg-emerald-50 rounded-lg px-3 py-2">
-                  <p className="text-xs text-emerald-600">Giá thuê/tháng</p>
-                  <p className="text-sm font-semibold text-emerald-700">${fmtNum(r.giaThue)}</p>
-                </div>
-                <div className="bg-gray-50 rounded-lg px-3 py-2">
-                  <p className="text-xs text-gray-400">Bắt đầu</p>
-                  <p className="text-sm font-medium text-gray-700">{fmtDate(r.ngayBatDau)}</p>
-                </div>
-                <div className="bg-gray-50 rounded-lg px-3 py-2">
-                  <p className="text-xs text-gray-400">Kết thúc</p>
-                  <p className="text-sm font-medium text-gray-700">{fmtDate(r.ngayKetThuc)}</p>
-                </div>
-                {r.ngayTangGia && (
-                  <div className="col-span-2 bg-orange-50 rounded-lg px-3 py-2 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-orange-500">Tăng giá vào</p>
-                      <p className="text-sm font-medium text-orange-700">{fmtDate(r.ngayTangGia)}</p>
-                    </div>
-                    {r.giaSauTang != null && (
-                      <p className="text-sm font-semibold text-orange-700">${fmtNum(r.giaSauTang)}</p>
+            <div className="py-3 px-2 text-sm text-gray-400">Đang tải...</div>
+          ) : (
+            <>
+              {tables.map(t => (
+                <div key={t.id} className="relative flex-shrink-0 group">
+                  <button
+                    onClick={() => { setActiveId(t.id); setSearch('') }}
+                    className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                      activeId === t.id
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {t.name}
+                  </button>
+                  {/* Tab ⋯ menu */}
+                  <div className="absolute top-2 right-1 opacity-0 group-hover:opacity-100 transition-opacity" ref={tabMenu === t.id ? tabMenuRef : undefined}>
+                    <button
+                      onClick={e => { e.stopPropagation(); setTabMenu(prev => prev === t.id ? null : t.id) }}
+                      className="p-1 rounded text-gray-300 hover:text-gray-500 hover:bg-gray-100"
+                    >
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+                        <circle cx="8" cy="2" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="14" r="1.5"/>
+                      </svg>
+                    </button>
+                    {tabMenu === t.id && (
+                      <div className="absolute top-7 left-0 w-36 bg-white rounded-lg shadow-xl border border-gray-200 z-50 py-1">
+                        <button
+                          onClick={() => { setTableModal({ open: true, editId: t.id, name: t.name }); setTabMenu(null) }}
+                          className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >✏️ Đổi tên</button>
+                        <button
+                          onClick={() => { setDelConfirm({ kind: 'table', id: t.id, label: `bảng "${t.name}"` }); setTabMenu(null) }}
+                          className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                        >🗑 Xóa bảng</button>
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
-            </div>
-          ))}
+                </div>
+              ))}
+
+              {/* Add table */}
+              <button
+                onClick={() => setTableModal({ open: true, editId: null, name: '' })}
+                className="flex-shrink-0 flex items-center gap-1.5 px-3 py-3 text-sm text-gray-400 hover:text-blue-600 transition-colors ml-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                </svg>
+                <span className="hidden sm:inline">Thêm bảng</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Add/Edit Modal — full screen on mobile */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center sm:p-4">
-          <div className="bg-white w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[95vh] sm:max-h-[90vh] flex flex-col">
-            <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
-              <h2 className="text-base sm:text-lg font-semibold text-gray-800">
-                {editId ? 'Chỉnh sửa thông tin' : 'Thêm mới'}
-              </h2>
-              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 p-1">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      {/* ── Main content ────────────────────────────────────────────────────── */}
+      <div className="flex-1 p-3 sm:p-5">
+
+        {/* Empty state — no tables */}
+        {!loading && tables.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M3 14h18M10 3v18M14 3v18"/>
+              </svg>
+            </div>
+            <h2 className="text-lg font-semibold text-gray-700 mb-1">Chưa có bảng nào</h2>
+            <p className="text-sm text-gray-400 mb-6">Tạo bảng đầu tiên để bắt đầu quản lý dữ liệu</p>
+            <button
+              onClick={() => setTableModal({ open: true, editId: null, name: '' })}
+              className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+              </svg>
+              Tạo bảng mới
+            </button>
+          </div>
+        )}
+
+        {activeTable && (
+          <>
+            {/* Toolbar */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+              <div className="relative flex-1 max-w-xs">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                 </svg>
-              </button>
+                <input type="text" placeholder="Tìm kiếm..." value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex gap-2 ml-auto">
+                <button onClick={openAddCol}
+                  className="flex items-center gap-1.5 border border-gray-300 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                  </svg>
+                  <span>Thêm cột</span>
+                </button>
+                <button onClick={openAddRow}
+                  className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                  </svg>
+                  <span>Thêm dòng</span>
+                </button>
+              </div>
             </div>
-            <div className="px-4 sm:px-6 py-4 sm:py-5 grid grid-cols-2 gap-3 sm:gap-4 overflow-y-auto flex-1">
-              <div className="col-span-2">
-                <Field label="Tên xưởng" required placeholder="VD: XƯỞNG THUẬN AN 1" value={form.tenXuong} onChange={(v) => setField('tenXuong', v)} />
-              </div>
-              <div className="col-span-2">
-                <Field label="Khu vực" required placeholder="VD: phường An Phú, TP.HCM" value={form.khuVuc} onChange={(v) => setField('khuVuc', v)} />
-              </div>
-              <Field label="Diện tích (m²)" type="number" required placeholder="1600" value={form.dienTich} onChange={(v) => setField('dienTich', v)} />
-              <Field label="Giá thuê (USD/T)" type="number" required placeholder="4171" value={form.giaThue} onChange={(v) => setField('giaThue', v)} />
-              <div className="col-span-2">
-                <Field label="Đơn vị thuê" required placeholder="VD: Công ty ABC" value={form.donViThue} onChange={(v) => setField('donViThue', v)} />
-              </div>
-              <Field label="Ngày bắt đầu" type="date" required value={form.ngayBatDau} onChange={(v) => setField('ngayBatDau', v)} />
-              <Field label="Ngày kết thúc" type="date" required value={form.ngayKetThuc} onChange={(v) => setField('ngayKetThuc', v)} />
-              <Field label="Ngày tăng giá" type="date" value={form.ngayTangGia} onChange={(v) => setField('ngayTangGia', v)} />
-              <Field label="Giá sau tăng (USD)" type="number" placeholder="4590" value={form.giaSauTang} onChange={(v) => setField('giaSauTang', v)} />
-              <div className="col-span-2">
-                <Field label="Ghi chú thời gian" placeholder="VD: 5 năm" value={form.thoiGianThue} onChange={(v) => setField('thoiGianThue', v)} />
-              </div>
+
+            {/* Table */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+
+              {/* Empty columns */}
+              {cols.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+                  <p className="text-sm text-gray-400 mb-4">Bảng chưa có cột nào</p>
+                  <button onClick={openAddCol}
+                    className="flex items-center gap-1.5 border border-dashed border-blue-300 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Thêm cột đầu tiên
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-max">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="w-10 px-3 py-3 text-center text-xs font-medium text-gray-400 select-none">#</th>
+                        {cols.map(col => (
+                          <th key={col.id}
+                            className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[140px] relative group/th"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-gray-400 text-[11px] select-none">
+                                {COL_TYPES.find(t => t.value === col.type)?.icon}
+                              </span>
+                              <span className="flex-1 truncate">{col.name}</span>
+                              {col.required && <span className="text-red-400">*</span>}
+                              {/* Column menu */}
+                              <div className="relative opacity-0 group-hover/th:opacity-100 transition-opacity"
+                                ref={colMenu === col.id ? colMenuRef : undefined}
+                              >
+                                <button
+                                  onClick={e => { e.stopPropagation(); setColMenu(prev => prev === col.id ? null : col.id) }}
+                                  className="p-0.5 rounded text-gray-300 hover:text-gray-500 hover:bg-gray-200"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16">
+                                    <circle cx="8" cy="2" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="14" r="1.5"/>
+                                  </svg>
+                                </button>
+                                {colMenu === col.id && (
+                                  <div className="absolute top-6 right-0 w-36 bg-white rounded-lg shadow-xl border border-gray-200 z-50 py-1">
+                                    <button onClick={() => openEditCol(col)}
+                                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                    >✏️ Chỉnh sửa</button>
+                                    <button
+                                      onClick={() => { setDelConfirm({ kind: 'column', id: col.id, label: `cột "${col.name}"` }); setColMenu(null) }}
+                                      className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                                    >🗑 Xóa cột</button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </th>
+                        ))}
+                        <th className="w-20 px-3 py-3 text-center text-xs font-medium text-gray-400">
+                          <button onClick={openAddCol}
+                            className="inline-flex items-center gap-1 text-gray-300 hover:text-blue-500 transition-colors"
+                            title="Thêm cột"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                            </svg>
+                          </button>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rowsLoading ? (
+                        <tr>
+                          <td colSpan={cols.length + 2} className="text-center py-12 text-gray-400 text-sm">
+                            Đang tải...
+                          </td>
+                        </tr>
+                      ) : filtered.length === 0 ? (
+                        <tr>
+                          <td colSpan={cols.length + 2} className="text-center py-14 text-gray-400 text-sm">
+                            {search
+                              ? `Không tìm thấy kết quả cho "${search}"`
+                              : 'Chưa có dữ liệu. Nhấn "Thêm dòng" để bắt đầu.'}
+                          </td>
+                        </tr>
+                      ) : filtered.map((row, idx) => (
+                        <tr key={row.id}
+                          className="border-b border-gray-100 hover:bg-blue-50/20 cursor-pointer transition-colors"
+                          onClick={() => openEditRow(row)}
+                        >
+                          <td className="px-3 py-3 text-gray-400 text-center text-xs select-none">{idx + 1}</td>
+                          {cols.map(col => {
+                            const cell = row.cells.find(c => c.columnId === col.id)
+                            return (
+                              <td key={col.id} className="px-3 py-3 text-gray-700 max-w-[220px]">
+                                <CellValue value={cell?.value ?? null} col={col} />
+                              </td>
+                            )
+                          })}
+                          <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-center gap-1">
+                              <button onClick={() => openEditRow(row)}
+                                className="text-blue-500 hover:text-blue-700 text-xs font-medium px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+                              >Sửa</button>
+                              <button onClick={() => setDelConfirm({ kind: 'row', id: row.id, label: 'dòng này' })}
+                                className="text-red-400 hover:text-red-600 text-xs font-medium px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                              >Xóa</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Table footer */}
+              {cols.length > 0 && (
+                <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between">
+                  <span className="text-xs text-gray-400">
+                    {filtered.length} dòng{search ? ` / ${rows.length} tổng` : ''}
+                  </span>
+                  <button onClick={openAddRow}
+                    className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Thêm dòng
+                  </button>
+                </div>
+              )}
             </div>
-            {formError && (
-              <div className="mx-4 sm:mx-6 mb-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                {formError}
-              </div>
-            )}
-            <div className="px-4 sm:px-6 py-4 border-t border-gray-200 flex gap-3 flex-shrink-0">
-              <button onClick={closeModal} className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                Hủy
-              </button>
-              <button onClick={handleSave} disabled={saving}
-                className="flex-1 sm:flex-none px-5 py-2.5 sm:py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {saving ? 'Đang lưu...' : editId ? 'Cập nhật' : 'Thêm mới'}
+          </>
+        )}
+      </div>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          Modals
+      ════════════════════════════════════════════════════════════════════ */}
+
+      {/* Table name modal */}
+      {tableModal.open && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6">
+            <h2 className="text-base font-semibold text-gray-800 mb-4">
+              {tableModal.editId ? 'Đổi tên bảng' : 'Tạo bảng mới'}
+            </h2>
+            <input autoFocus type="text"
+              placeholder="Tên bảng..."
+              value={tableModal.name}
+              onChange={e => setTableModal(m => ({ ...m, name: e.target.value }))}
+              onKeyDown={e => e.key === 'Enter' && handleSaveTable()}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+            />
+            <div className="flex gap-3">
+              <button onClick={() => setTableModal({ open: false, editId: null, name: '' })}
+                className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600">Hủy</button>
+              <button onClick={handleSaveTable} disabled={saving || !tableModal.name.trim()}
+                className="flex-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                {saving ? 'Đang lưu...' : tableModal.editId ? 'Lưu' : 'Tạo bảng'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Upload Modal — full screen on mobile */}
-      {showUpload && (
+      {/* Column modal */}
+      {colModal.open && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center sm:p-4">
-          <div className="bg-white w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[95vh] sm:max-h-[90vh] flex flex-col">
-            <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
-              <h2 className="text-base sm:text-lg font-semibold text-gray-800">Import Excel / CSV</h2>
-              <button onClick={closeUpload} className="text-gray-400 hover:text-gray-600 p-1">
+          <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[92vh] flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-base font-semibold text-gray-800">
+                {colModal.editCol ? 'Chỉnh sửa cột' : 'Thêm cột mới'}
+              </h2>
+              <button onClick={() => setColModal(m => ({ ...m, open: false }))}
+                className="text-gray-400 hover:text-gray-600 p-1">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
                 </svg>
               </button>
             </div>
-            <div className="p-4 sm:p-6 overflow-y-auto flex-1">
-              {!uploadPreview && (
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setUploadDragging(true) }}
-                  onDragLeave={() => setUploadDragging(false)}
-                  onDrop={(e) => { e.preventDefault(); setUploadDragging(false); const f = e.dataTransfer.files[0]; if (f) parseUploadFile(f) }}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-xl p-8 sm:p-10 text-center cursor-pointer transition-colors ${
-                    uploadDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
-                  }`}
-                >
-                  <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) parseUploadFile(f) }}
-                  />
-                  {uploadParsing ? (
-                    <p className="text-gray-500 text-sm">Đang đọc file...</p>
-                  ) : (
-                    <>
-                      <svg className="w-10 h-10 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <p className="text-sm font-medium text-gray-700">Kéo thả hoặc tap để chọn file</p>
-                      <p className="text-xs text-gray-400 mt-1">Hỗ trợ .xlsx, .xls, .csv</p>
-                    </>
-                  )}
+
+            <div className="p-5 overflow-y-auto flex-1 space-y-5">
+              {/* Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Tên cột <span className="text-red-500">*</span>
+                </label>
+                <input autoFocus type="text"
+                  value={colModal.name}
+                  onChange={e => setColModal(m => ({ ...m, name: e.target.value }))}
+                  placeholder="VD: Tên dự án, Diện tích..."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Kiểu dữ liệu</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {COL_TYPES.map(ct => (
+                    <button key={ct.value}
+                      onClick={() => setColModal(m => ({ ...m, type: ct.value }))}
+                      className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
+                        colModal.type === ct.value
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="font-mono text-base w-5 text-center leading-none">{ct.icon}</span>
+                      {ct.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Select options */}
+              {colModal.type === 'select' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Danh sách tùy chọn
+                  </label>
+                  <div className="space-y-1.5 mb-3">
+                    {colModal.options.length === 0 && (
+                      <p className="text-xs text-gray-400">Chưa có tùy chọn nào</p>
+                    )}
+                    {colModal.options.map((opt, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${BADGE_COLORS[i % BADGE_COLORS.length]}`}>
+                          {opt}
+                        </span>
+                        <button
+                          onClick={() => setColModal(m => ({ ...m, options: m.options.filter((_, j) => j !== i) }))}
+                          className="ml-auto text-gray-300 hover:text-red-500 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input type="text"
+                      placeholder="Nhập tùy chọn rồi nhấn Enter..."
+                      value={colModal.newOption}
+                      onChange={e => setColModal(m => ({ ...m, newOption: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && colModal.newOption.trim()) {
+                          setColModal(m => ({ ...m, options: [...m.options, m.newOption.trim()], newOption: '' }))
+                        }
+                      }}
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={() => {
+                        if (colModal.newOption.trim())
+                          setColModal(m => ({ ...m, options: [...m.options, m.newOption.trim()], newOption: '' }))
+                      }}
+                      className="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200 transition-colors font-medium"
+                    >Thêm</button>
+                  </div>
                 </div>
               )}
-              {uploadPreview && (
-                <div className="space-y-3 sm:space-y-4">
-                  <div className="flex flex-wrap items-center gap-2 justify-between">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium text-gray-700 truncate max-w-[180px]">{uploadFile?.name}</span>
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">{uploadPreview.valid.length} hợp lệ</span>
-                      {uploadPreview.errors.length > 0 && (
-                        <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">{uploadPreview.errors.length} lỗi</span>
-                      )}
-                    </div>
-                    <button onClick={() => { setUploadPreview(null); setUploadFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
-                      className="text-xs text-gray-500 hover:text-gray-700 underline"
-                    >Chọn file khác</button>
-                  </div>
-                  {uploadPreview.errors.length > 0 && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1">
-                      {uploadPreview.errors.map((e, i) => <p key={i} className="text-xs text-red-700">{e}</p>)}
-                    </div>
-                  )}
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto max-h-56">
-                      <table className="w-full text-xs">
-                        <thead className="bg-gray-50 sticky top-0">
-                          <tr>
-                            {['Tên xưởng','Khu vực','Diện tích','Giá thuê','Đơn vị thuê','Bắt đầu','Kết thúc'].map(h => (
-                              <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {uploadPreview.valid.map((row, i) => (
-                            <tr key={i} className="border-t border-gray-100">
-                              <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{row.tenXuong}</td>
-                              <td className="px-3 py-2 text-gray-600 max-w-[120px] truncate">{row.khuVuc}</td>
-                              <td className="px-3 py-2 text-gray-700">{row.dienTich?.toLocaleString('vi-VN')}</td>
-                              <td className="px-3 py-2 text-emerald-700">${row.giaThue?.toLocaleString('vi-VN')}</td>
-                              <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{row.donViThue}</td>
-                              <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.ngayBatDau ? new Date(row.ngayBatDau).toLocaleDateString('vi-VN') : '—'}</td>
-                              <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.ngayKetThuc ? new Date(row.ngayKetThuc).toLocaleDateString('vi-VN') : '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )}
+
+              {/* Required */}
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" checked={colModal.required}
+                  onChange={e => setColModal(m => ({ ...m, required: e.target.checked }))}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">Bắt buộc nhập</span>
+              </label>
             </div>
-            <div className="px-4 sm:px-6 py-4 border-t border-gray-200 flex gap-3 flex-shrink-0">
-              <button onClick={closeUpload} className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Hủy</button>
-              {uploadPreview && uploadPreview.valid.length > 0 && (
-                <button onClick={handleImport} disabled={uploadImporting}
-                  className="flex-1 sm:flex-none px-5 py-2.5 sm:py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
+
+            <div className="px-5 py-4 border-t border-gray-200 flex flex-col gap-2 flex-shrink-0">
+              <div className="flex gap-3">
+                <button onClick={() => setColModal(m => ({ ...m, open: false }))}
+                  className="flex-1 px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600">Hủy</button>
+                <button onClick={handleSaveCol} disabled={saving || !colModal.name.trim()}
+                  className="flex-1 px-4 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                  {saving ? 'Đang lưu...' : colModal.editCol ? 'Cập nhật' : 'Thêm cột'}
+                </button>
+              </div>
+              {/* Delete column — only when editing */}
+              {colModal.editCol && (
+                <button
+                  onClick={() => setDelConfirm({ kind: 'column', id: colModal.editCol!.id, label: `cột "${colModal.editCol!.name}"` })}
+                  className="w-full px-4 py-2 text-sm text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
                 >
-                  {uploadImporting ? 'Đang import...' : `Import ${uploadPreview.valid.length} dòng`}
+                  🗑 Xóa cột này
                 </button>
               )}
             </div>
@@ -732,28 +849,86 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Delete Confirm */}
-      {deleteId && (
+      {/* Row modal */}
+      {rowModal.open && activeTable && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center sm:p-4">
-          <div className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 sm:p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          <div className="bg-white w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[95vh] sm:max-h-[90vh] flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-base font-semibold text-gray-800">
+                {rowModal.editRow ? 'Chỉnh sửa' : 'Thêm dòng mới'}
+              </h2>
+              <button onClick={() => setRowModal(m => ({ ...m, open: false }))}
+                className="text-gray-400 hover:text-gray-600 p-1">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
                 </svg>
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-800">Xác nhận xóa</h3>
-                <p className="text-sm text-gray-500 mt-0.5">Hành động này không thể hoàn tác.</p>
-              </div>
+              </button>
             </div>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteId(null)} className="flex-1 px-4 py-2.5 sm:py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Hủy</button>
-              <button onClick={() => handleDelete(deleteId)} className="flex-1 px-4 py-2.5 sm:py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">Xóa</button>
+
+            <div className="p-5 overflow-y-auto flex-1">
+              {activeTable.columns.length === 0 ? (
+                <p className="text-center text-sm text-gray-400 py-8">Bảng chưa có cột nào.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {activeTable.columns.map(col => (
+                    <div key={col.id} className={col.type === 'textarea' ? 'sm:col-span-2' : ''}>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                        <span className="font-mono text-gray-400 text-xs mr-1">
+                          {COL_TYPES.find(t => t.value === col.type)?.icon}
+                        </span>
+                        {col.name}
+                        {col.required && <span className="text-red-500 ml-1">*</span>}
+                      </label>
+                      <FieldInput
+                        col={col}
+                        value={rowModal.values[col.id] ?? ''}
+                        onChange={v => setRowModal(m => ({ ...m, values: { ...m.values, [col.id]: v } }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 py-4 border-t border-gray-200 flex gap-3 flex-shrink-0">
+              <button onClick={() => setRowModal(m => ({ ...m, open: false }))}
+                className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600">Hủy</button>
+              <button onClick={handleSaveRow} disabled={saving}
+                className="flex-1 sm:flex-none px-5 py-2.5 sm:py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                {saving ? 'Đang lưu...' : rowModal.editRow ? 'Cập nhật' : 'Thêm mới'}
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Delete confirm */}
+      {delConfirm && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center sm:p-4">
+          <div className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 sm:p-6">
+            <div className="flex items-start gap-3 mb-5">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-800">Xác nhận xóa</h3>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Bạn chắc chắn muốn xóa {delConfirm.label}? Thao tác không thể hoàn tác.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setDelConfirm(null)}
+                className="flex-1 px-4 py-2.5 sm:py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600">Hủy</button>
+              <button onClick={handleConfirmDelete}
+                className="flex-1 px-4 py-2.5 sm:py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">Xóa</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

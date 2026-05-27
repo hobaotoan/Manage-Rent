@@ -14,18 +14,44 @@ model User {
   createdAt DateTime @default(now())
 }
 
-model KhachThue {
-  id           Int       @id @default(autoincrement())
-  tenXuong     String
-  khuVuc       String
-  dienTich     Float
-  giaThue      Float
-  donViThue    String
-  ngayBatDau   DateTime
-  ngayKetThuc  DateTime
-  thoiGianThue String?
-  ngayTangGia  DateTime?
-  giaSauTang   Float?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+model WorkTable {
+  id        Int          @id @default(autoincrement())
+  name      String
+  position  Int          @default(0)
+  columns   WorkColumn[]
+  rows      WorkRow[]
+  createdAt DateTime     @default(now())
+}
+
+model WorkColumn {
+  id        Int        @id @default(autoincrement())
+  tableId   Int
+  table     WorkTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  name      String
+  type      String     @default("text")
+  required  Boolean    @default(false)
+  position  Int        @default(0)
+  options   String?
+  cells     WorkCell[]
+}
+
+model WorkRow {
+  id        Int        @id @default(autoincrement())
+  tableId   Int
+  table     WorkTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  position  Int        @default(0)
+  cells     WorkCell[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model WorkCell {
+  id       Int        @id @default(autoincrement())
+  rowId    Int
+  row      WorkRow    @relation(fields: [rowId], references: [id], onDelete: Cascade)
+  columnId Int
+  column   WorkColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  value    String?
+
+  @@unique([rowId, columnId])
 }
