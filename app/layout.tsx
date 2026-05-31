@@ -1,7 +1,15 @@
 import type { Metadata } from 'next'
+import { Be_Vietnam_Pro } from 'next/font/google'
 import './globals.css'
 import { getSession } from '@/lib/auth'
 import LogoutButton from './LogoutButton'
+
+const beVietnamPro = Be_Vietnam_Pro({
+  subsets: ['vietnamese', 'latin'],
+  weight: ['300', '400', '500', '600', '700', '800'],
+  display: 'swap',
+  variable: '--font-be-vietnam',
+})
 
 export const metadata: Metadata = {
   title: 'Quản Lý Dữ Liệu',
@@ -12,8 +20,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const session = await getSession()
 
   return (
-    <html lang="vi">
-      <body className="min-h-screen bg-gray-50">
+    <html lang="vi" className={beVietnamPro.variable}>
+      <body className={`min-h-screen bg-gray-50 ${beVietnamPro.className}`}>
         {session && (
           <div className="bg-white border-b border-gray-100 px-6 py-2 flex items-center justify-end gap-3">
             <div className="flex items-center gap-2 text-sm text-gray-600">
