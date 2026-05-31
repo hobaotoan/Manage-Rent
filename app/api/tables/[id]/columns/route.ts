@@ -13,7 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       type: type ?? 'text',
       required: required ?? false,
       position: count,
-      options: options?.length ? JSON.stringify(options) : null,
+      options: options != null ? JSON.stringify(options) : null,
     },
   })
   return Response.json(column, { status: 201 })

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ColType = 'text' | 'number' | 'date' | 'select' | 'textarea' | 'url' | 'checkbox'
+type ColType = 'text' | 'number' | 'date' | 'select' | 'textarea' | 'url' | 'checkbox' | 'currency'
 
 type WorkColumn = {
   id: number
@@ -43,6 +43,7 @@ type WorkTable = {
 const COL_TYPES: { value: ColType; label: string; icon: string }[] = [
   { value: 'text',     label: 'Văn bản',   icon: 'T'  },
   { value: 'number',   label: 'Số',         icon: '#'  },
+  { value: 'currency', label: 'Giá tiền',  icon: '₫'  },
   { value: 'date',     label: 'Ngày',       icon: '⊡'  },
   { value: 'select',   label: 'Lựa chọn',  icon: '▾'  },
   { value: 'textarea', label: 'Đoạn văn',  icon: '¶'  },
@@ -80,6 +81,29 @@ function fmtNum(val: string | null) {
   return isNaN(n) ? val : n.toLocaleString('vi-VN')
 }
 
+type CurrencyOpts = { currency: 'VND' | 'USD'; period: 'month' | 'year' | 'none' }
+
+function parseCurrencyOpts(raw: string | null): CurrencyOpts {
+  try {
+    const p = JSON.parse(raw ?? '{}')
+    return {
+      currency: p.currency === 'VND' ? 'VND' : 'USD',
+      period:   p.period === 'year' ? 'year' : p.period === 'none' ? 'none' : 'month',
+    }
+  } catch { return { currency: 'USD', period: 'month' } }
+}
+
+function fmtCurrency(val: string | null, opts: CurrencyOpts): string {
+  if (!val) return ''
+  const n = Number(val)
+  if (isNaN(n)) return val
+  const amount = opts.currency === 'VND'
+    ? n.toLocaleString('vi-VN') + ' ₫'
+    : '$' + n.toLocaleString('vi-VN')
+  const period = opts.period === 'month' ? '/tháng' : opts.period === 'year' ? '/năm' : ''
+  return amount + period
+}
+
 // ─── Sub-components (outside main to avoid remount on re-render) ──────────────
 
 function CellValue({ value, col }: { value: string | null; col: WorkColumn }) {
@@ -89,6 +113,27 @@ function CellValue({ value, col }: { value: string | null; col: WorkColumn }) {
   switch (col.type) {
     case 'number':
       return <span className="font-bold tabular-nums text-gray-900">{fmtNum(value)}</span>
+    case 'currency': {
+      const opts = parseCurrencyOpts(col.options)
+      const n = Number(value)
+      if (isNaN(n)) return <span>{value}</span>
+      const amount = opts.currency === 'VND'
+        ? n.toLocaleString('vi-VN')
+        : n.toLocaleString('vi-VN')
+      const period = opts.period === 'month' ? '/tháng' : opts.period === 'year' ? '/năm' : ''
+      return (
+        <span className="inline-flex items-baseline gap-0.5">
+          {opts.currency === 'USD'
+            ? <span className="text-xs font-semibold text-emerald-600">$</span>
+            : null}
+          <span className="font-bold tabular-nums text-gray-900">{amount}</span>
+          {opts.currency === 'VND'
+            ? <span className="text-xs font-semibold text-emerald-600 ml-0.5">₫</span>
+            : null}
+          {period && <span className="text-xs text-gray-400 font-medium">{period}</span>}
+        </span>
+      )
+    }
     case 'date':
       return <span className="font-semibold text-gray-800">{fmtDate(value)}</span>
     case 'checkbox':
@@ -128,6 +173,26 @@ function FieldInput({ col, value, onChange }: FieldInputProps) {
   switch (col.type) {
     case 'number':
       return <input type="number" value={value} onChange={e => onChange(e.target.value)} className={base} />
+    case 'currency': {
+      const opts = parseCurrencyOpts(col.options)
+      const prefix = opts.currency === 'USD' ? '$' : ''
+      const suffix = opts.currency === 'VND' ? ' ₫' : ''
+      const periodLabel = opts.period === 'month' ? '/tháng' : opts.period === 'year' ? '/năm' : ''
+      return (
+        <div className="relative flex items-center">
+          {prefix && <span className="absolute left-3 text-sm font-semibold text-gray-500 pointer-events-none">{prefix}</span>}
+          <input type="number" value={value} onChange={e => onChange(e.target.value)}
+            className={base + (prefix ? ' pl-6' : '') + (suffix || periodLabel ? ' pr-20' : '')}
+            placeholder="0"
+          />
+          {(suffix || periodLabel) && (
+            <span className="absolute right-3 text-xs font-medium text-gray-400 pointer-events-none whitespace-nowrap">
+              {suffix}{periodLabel}
+            </span>
+          )}
+        </div>
+      )
+    }
     case 'date':
       return <input type="date" value={value} onChange={e => onChange(e.target.value)} className={base} />
     case 'checkbox':
@@ -165,6 +230,8 @@ type ColModal    = {
   open: boolean; editCol: WorkColumn | null
   name: string; type: ColType; required: boolean
   options: string[]; newOption: string
+  currencyUnit: 'USD' | 'VND'
+  period: 'month' | 'year' | 'none'
 }
 type RowModal    = { open: boolean; editRow: WorkRow | null; values: Record<number, string> }
 type DelConfirm  = { kind: 'table' | 'column' | 'row'; id: number; label: string }
@@ -266,7 +333,8 @@ export default function HomePage() {
 
   const [tableModal,  setTableModal]  = useState<TableModal>({ open: false, editId: null, name: '' })
   const [colModal,    setColModal]    = useState<ColModal>({
-    open: false, editCol: null, name: '', type: 'text', required: false, options: [], newOption: ''
+    open: false, editCol: null, name: '', type: 'text', required: false,
+    options: [], newOption: '', currencyUnit: 'USD', period: 'month'
   })
   const [rowModal,    setRowModal]    = useState<RowModal>({ open: false, editRow: null, values: {} })
   const [delConfirm,  setDelConfirm]  = useState<DelConfirm | null>(null)
@@ -370,13 +438,18 @@ export default function HomePage() {
   // ── Column CRUD ────────────────────────────────────────────────────────────
 
   function openAddCol() {
-    setColModal({ open: true, editCol: null, name: '', type: 'text', required: false, options: [], newOption: '' })
+    setColModal({ open: true, editCol: null, name: '', type: 'text', required: false, options: [], newOption: '', currencyUnit: 'USD', period: 'month' })
   }
 
   function openEditCol(col: WorkColumn) {
+    const currencyOpts = col.type === 'currency' ? parseCurrencyOpts(col.options) : null
     setColModal({
       open: true, editCol: col, name: col.name, type: col.type,
-      required: col.required, options: parseOptions(col.options), newOption: '',
+      required: col.required,
+      options: col.type === 'select' ? parseOptions(col.options) : [],
+      newOption: '',
+      currencyUnit: currencyOpts?.currency ?? 'USD',
+      period: currencyOpts?.period ?? 'month',
     })
     setColMenu(null)
   }
@@ -385,10 +458,14 @@ export default function HomePage() {
     if (!colModal.name.trim() || !activeId) return
     setSaving(true)
     try {
+      const colOptions = colModal.type === 'currency'
+        ? { currency: colModal.currencyUnit, period: colModal.period }
+        : colModal.type === 'select' ? colModal.options : null
+
       if (colModal.editCol) {
         const res  = await fetch(`/api/tables/${activeId}/columns/${colModal.editCol.id}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: colModal.name, type: colModal.type, required: colModal.required, options: colModal.options }),
+          body: JSON.stringify({ name: colModal.name, type: colModal.type, required: colModal.required, options: colOptions }),
         })
         const updated: WorkColumn = await res.json()
         setTables(prev => prev.map(t => t.id === activeId
@@ -399,7 +476,7 @@ export default function HomePage() {
       } else {
         const res  = await fetch(`/api/tables/${activeId}/columns`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: colModal.name, type: colModal.type, required: colModal.required, options: colModal.options }),
+          body: JSON.stringify({ name: colModal.name, type: colModal.type, required: colModal.required, options: colOptions }),
         })
         const created: WorkColumn = await res.json()
         setTables(prev => prev.map(t => t.id === activeId
@@ -408,7 +485,7 @@ export default function HomePage() {
         ))
         showToast('Đã thêm cột', 'success')
       }
-      setColModal({ open: false, editCol: null, name: '', type: 'text', required: false, options: [], newOption: '' })
+      setColModal({ open: false, editCol: null, name: '', type: 'text', required: false, options: [], newOption: '', currencyUnit: 'USD', period: 'month' })
     } catch { showToast('Lỗi khi lưu cột', 'error') }
     finally { setSaving(false) }
   }
@@ -903,6 +980,60 @@ export default function HomePage() {
                   ))}
                 </div>
               </div>
+
+              {/* Currency settings */}
+              {colModal.type === 'currency' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Đơn vị tiền tệ</label>
+                    <div className="flex gap-2">
+                      {(['USD', 'VND'] as const).map(c => (
+                        <button key={c}
+                          onClick={() => setColModal(m => ({ ...m, currencyUnit: c }))}
+                          className={`flex-1 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${
+                            colModal.currencyUnit === c
+                              ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                              : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          {c === 'USD' ? '$ USD' : '₫ VND'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Kỳ hạn</label>
+                    <div className="flex gap-2">
+                      {([
+                        { value: 'month', label: '/Tháng' },
+                        { value: 'year',  label: '/Năm'   },
+                        { value: 'none',  label: 'Không'  },
+                      ] as const).map(p => (
+                        <button key={p.value}
+                          onClick={() => setColModal(m => ({ ...m, period: p.value }))}
+                          className={`flex-1 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${
+                            colModal.period === p.value
+                              ? 'border-blue-500 bg-blue-50 text-blue-700'
+                              : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Preview */}
+                  <div className="bg-gray-50 rounded-xl px-4 py-3 flex items-center gap-2">
+                    <span className="text-xs text-gray-400 font-medium">Xem trước:</span>
+                    <span className="font-bold text-gray-800 text-sm">
+                      {colModal.currencyUnit === 'USD' ? '$' : ''}
+                      {'4,000,000'}
+                      {colModal.currencyUnit === 'VND' ? ' ₫' : ''}
+                      {colModal.period === 'month' ? '/tháng' : colModal.period === 'year' ? '/năm' : ''}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Select options */}
               {colModal.type === 'select' && (

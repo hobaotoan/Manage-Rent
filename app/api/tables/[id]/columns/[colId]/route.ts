@@ -10,7 +10,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       name: name?.trim(),
       type,
       required,
-      options: options?.length ? JSON.stringify(options) : null,
+      options: options != null ? JSON.stringify(options) : null,
     },
   })
   return Response.json(column)
