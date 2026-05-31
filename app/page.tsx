@@ -88,18 +88,18 @@ function CellValue({ value, col }: { value: string | null; col: WorkColumn }) {
 
   switch (col.type) {
     case 'number':
-      return <span className="font-mono tabular-nums">{fmtNum(value)}</span>
+      return <span className="font-bold tabular-nums text-gray-900">{fmtNum(value)}</span>
     case 'date':
-      return <span>{fmtDate(value)}</span>
+      return <span className="font-semibold text-gray-800">{fmtDate(value)}</span>
     case 'checkbox':
       return value === 'true'
-        ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600 text-xs">✓</span>
-        : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 text-gray-400 text-xs">✗</span>
+        ? <span className="inline-flex items-center gap-1 text-green-700 font-semibold text-xs"><span className="w-4 h-4 rounded-full bg-green-500 text-white flex items-center justify-center text-[10px]">✓</span>Có</span>
+        : <span className="inline-flex items-center gap-1 text-gray-400 text-xs"><span className="w-4 h-4 rounded-full bg-gray-200 text-gray-400 flex items-center justify-center text-[10px]">✗</span>Không</span>
     case 'url':
       return (
         <a href={value} target="_blank" rel="noopener noreferrer"
           onClick={e => e.stopPropagation()}
-          className="text-blue-600 hover:underline truncate max-w-[180px] block text-sm"
+          className="text-blue-600 hover:text-blue-800 hover:underline truncate max-w-[200px] block text-sm font-medium"
         >{value}</a>
       )
     case 'select': {
@@ -107,15 +107,15 @@ function CellValue({ value, col }: { value: string | null; col: WorkColumn }) {
       const idx = opts.indexOf(value)
       const color = BADGE_COLORS[idx >= 0 ? idx % BADGE_COLORS.length : 0]
       return (
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${color}`}>
+        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${color}`}>
           {value}
         </span>
       )
     }
     case 'textarea':
-      return <span className="line-clamp-2 text-sm whitespace-pre-line">{value}</span>
+      return <span className="line-clamp-2 text-sm font-medium text-gray-800 whitespace-pre-line">{value}</span>
     default:
-      return <span className="text-sm">{value}</span>
+      return <span className="text-sm font-semibold text-gray-800">{value}</span>
   }
 }
 
@@ -184,41 +184,42 @@ function CardView({ rows, cols, onEdit, onDelete }: CardViewProps) {
   const restCols   = cols.slice(1)
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
       {rows.map((row, idx) => {
         const primaryCell = row.cells.find(c => c.columnId === primaryCol?.id)
         return (
           <div key={row.id}
-            className="bg-white rounded-xl border border-gray-200 flex flex-col hover:shadow-md transition-shadow cursor-pointer"
+            className="bg-white rounded-2xl border border-gray-200 flex flex-col hover:shadow-lg hover:border-blue-200 transition-all cursor-pointer group"
             onClick={() => onEdit(row)}
           >
-            {/* Card header */}
-            <div className="px-4 pt-4 pb-3 border-b border-gray-100">
+            {/* Card header — accent bar + title */}
+            <div className="h-1 rounded-t-2xl bg-gradient-to-r from-blue-500 to-indigo-400" />
+            <div className="px-4 pt-3 pb-3 border-b border-gray-100">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
                   {primaryCol && (
-                    <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-0.5">
+                    <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-widest mb-1">
                       {primaryCol.name}
                     </p>
                   )}
-                  <p className="font-semibold text-gray-800 text-sm leading-snug break-words">
-                    {primaryCell?.value || <span className="text-gray-300 font-normal">—</span>}
+                  <p className="font-bold text-gray-900 text-base leading-snug break-words">
+                    {primaryCell?.value || <span className="text-gray-300 font-normal text-sm">Chưa có dữ liệu</span>}
                   </p>
                 </div>
-                <span className="flex-shrink-0 text-[10px] text-gray-300 bg-gray-50 rounded-full px-2 py-0.5 font-mono">
+                <span className="flex-shrink-0 text-[10px] text-gray-400 bg-gray-100 rounded-full px-2 py-0.5 font-mono font-semibold">
                   #{idx + 1}
                 </span>
               </div>
             </div>
 
             {/* Card body */}
-            <div className="px-4 py-3 flex-1 grid grid-cols-2 gap-x-4 gap-y-2.5">
+            <div className="px-4 py-3 flex-1 grid grid-cols-2 gap-x-5 gap-y-3">
               {restCols.map(col => {
                 const cell = row.cells.find(c => c.columnId === col.id)
                 return (
                   <div key={col.id} className={col.type === 'textarea' || col.type === 'url' ? 'col-span-2' : ''}>
-                    <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-0.5">{col.name}</p>
-                    <div className="text-sm text-gray-700">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">{col.name}</p>
+                    <div>
                       <CellValue value={cell?.value ?? null} col={col} />
                     </div>
                   </div>
@@ -227,14 +228,14 @@ function CardView({ rows, cols, onEdit, onDelete }: CardViewProps) {
             </div>
 
             {/* Card footer */}
-            <div className="px-4 py-2.5 border-t border-gray-100 flex gap-2" onClick={e => e.stopPropagation()}>
+            <div className="px-4 py-3 border-t border-gray-100 flex gap-2" onClick={e => e.stopPropagation()}>
               <button onClick={() => onEdit(row)}
-                className="flex-1 text-xs font-medium text-blue-600 hover:text-blue-700 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
-                ✏️ Sửa
+                className="flex-1 text-xs font-semibold text-blue-600 hover:text-blue-700 py-2 rounded-xl hover:bg-blue-50 transition-colors flex items-center justify-center gap-1">
+                ✏️ Chỉnh sửa
               </button>
               <div className="w-px bg-gray-100" />
               <button onClick={() => onDelete(row.id)}
-                className="flex-1 text-xs font-medium text-red-500 hover:text-red-600 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                className="flex-1 text-xs font-semibold text-red-500 hover:text-red-600 py-2 rounded-xl hover:bg-red-50 transition-colors flex items-center justify-center gap-1">
                 🗑 Xóa
               </button>
             </div>
@@ -772,14 +773,14 @@ export default function HomePage() {
                         </tr>
                       ) : filtered.map((row, idx) => (
                         <tr key={row.id}
-                          className="border-b border-gray-100 hover:bg-blue-50/20 cursor-pointer transition-colors"
+                          className="border-b border-gray-100 hover:bg-blue-50/30 cursor-pointer transition-colors"
                           onClick={() => openEditRow(row)}
                         >
-                          <td className="px-3 py-3 text-gray-400 text-center text-xs select-none">{idx + 1}</td>
+                          <td className="px-3 py-3.5 text-gray-400 text-center text-xs select-none font-semibold">{idx + 1}</td>
                           {cols.map(col => {
                             const cell = row.cells.find(c => c.columnId === col.id)
                             return (
-                              <td key={col.id} className="px-3 py-3 text-gray-700 max-w-[220px]">
+                              <td key={col.id} className="px-3 py-3.5 max-w-[220px]">
                                 <CellValue value={cell?.value ?? null} col={col} />
                               </td>
                             )
